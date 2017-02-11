@@ -32,7 +32,7 @@
 *.dSYM/
 *.su
 
-/swt
+/swb
 /.*
 /*.kdev4
 /core 

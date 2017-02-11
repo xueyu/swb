@@ -10,7 +10,6 @@
 #include "client.h"
 #include "event.h"
 
-
 static int parse_url(env_t* env, const char* url)
 {
     struct http_parser_url parser;
@@ -40,9 +39,6 @@ static int parse_url(env_t* env, const char* url)
     if (env->port == 0) {
         env->port = 80;
     }
-
-    //printf("url: http://%s:%d%s?%s\n", env->host, env->port, env->path, env->query);
-
     return 0;
 }
 
@@ -90,25 +86,20 @@ static int parse_option(env_t* env, int argc, char* argv[])
     return 0;
 }
 
-
-
 int main(int argc, char* argv[])
 {
     struct env_t env;
     memset(&env, 0, sizeof(struct env_t));
 
+    // -c currency
+    // -n total request num
+    // -t duration seconds
+    // -p process
     if (parse_option(&env, argc, argv) != 0) {
         return 1;
     }
 
-    // -c currency
-    // -n total request num
-    // -t duration seconds
-
-    // -p process
-
     event_create();
-
 
     client_t** clientArr = malloc(env.concurrency* sizeof(client_t*));
     for (int i = 0; i < env.concurrency; ++i) {
@@ -116,10 +107,15 @@ int main(int argc, char* argv[])
         clientArr[i] = client;
     }
 
-    event_pool();
+    int err = 0;
+    do {
+        err = event_pool_once();
+    } while (!err);
 
     for (int i = 0; i < env.concurrency; ++i) {
-        client_destroy(clientArr[i]);
+        if (clientArr[i]) {
+            client_destroy(clientArr[i]);
+        }
     }
     free(clientArr);
 

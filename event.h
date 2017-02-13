@@ -20,7 +20,16 @@ void event_add_watch(int fd, int evtFlag, event_watcher_t* watcher);
 void event_update_watch(int fd, int evtFlag, event_watcher_t* watcher);
 void event_delete_watch(int fd);
 
-void event_pool();
-int event_pool_once();
+void event_poll();
+int event_poll_once();
+
+
+
+typedef struct event_timer_t event_timer_t;
+typedef void (*event_timer_callback_t)(event_timer_t* timer, void* userdata);
+
+event_timer_t* event_set_timeout(event_timer_callback_t callback, void* userdata, int milliseconds);
+event_timer_t* event_set_interval(event_timer_callback_t callback, void* userdata, int milliseconds);
+void event_release_timer(event_timer_t* timer);
 
 #endif

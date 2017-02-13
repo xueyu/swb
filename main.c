@@ -86,6 +86,11 @@ static int parse_option(env_t* env, int argc, char* argv[])
     return 0;
 }
 
+static void on_time_interval(event_timer_t* timer, void* userdata)
+{
+    printf("on time interval..\n");
+}
+
 int main(int argc, char* argv[])
 {
     struct env_t env;
@@ -101,6 +106,8 @@ int main(int argc, char* argv[])
 
     event_create();
 
+    event_timer_t* timer = event_set_interval(on_time_interval, NULL, 1000);
+
     client_t** clientArr = malloc(env.concurrency* sizeof(client_t*));
     for (int i = 0; i < env.concurrency; ++i) {
         client_t* client = client_create(&env);
@@ -109,7 +116,7 @@ int main(int argc, char* argv[])
 
     int err = 0;
     do {
-        err = event_pool_once();
+        err = event_poll_once();
     } while (!err);
 
     for (int i = 0; i < env.concurrency; ++i) {
@@ -118,6 +125,7 @@ int main(int argc, char* argv[])
         }
     }
     free(clientArr);
+    event_release_timer(timer);
 
     event_destroy();
 

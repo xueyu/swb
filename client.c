@@ -53,6 +53,18 @@ static void buff_delete_front(buff_t* buff)
     }
 };
 
+static void buff_clear(buff_t* buff)
+{
+    buff_item_t* item = buff->head;
+    while (item) {
+        buff_item_t* tmp = item;
+        free(tmp);
+        item = item->next;
+    }
+    buff->head = NULL;
+    buff->tail = NULL;
+}
+
 struct client_t {
     int fd;
     int pendingConnect;

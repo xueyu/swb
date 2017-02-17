@@ -7,7 +7,7 @@
 #include <signal.h>
 #include <unistd.h>
 
-#define EVENT_BUFF_SIZE 64
+#define EVENT_BUFF_SIZE 256
 
 struct event_t {
 

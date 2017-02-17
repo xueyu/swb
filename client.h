@@ -9,5 +9,6 @@ client_t* client_create(env_t* env);
 
 void client_destroy(client_t* client);
 
+void client_update(client_t* client);
 
 #endif

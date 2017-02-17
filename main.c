@@ -2,130 +2,100 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <getopt.h>
-#include <string.h>
 
 #include "http_parser.h"
 #include "env.h"
 #include "client.h"
 #include "event.h"
 
-static int parse_url(env_t* env, const char* url)
+static struct env_t env;
+static client_t** clientArr;
+static event_timer_t* timer;
+static int stop = 0;
+
+static void dump_statistic()
 {
-    struct http_parser_url parser;
-    http_parser_url_init(&parser);
+    printf("finish request: %u\n", env.statistic.requestCount);
+    printf("connect time: mean=%dms, max=%dms\n", env.statistic.connectMeanMs, env.statistic.connectMaxMs);
+    printf("process time: mean=%dms, max=%dms\n", env.statistic.processMeanMs, env.statistic.processMaxMs);
+    printf("request time: mean=%dms, max=%dms\n", env.statistic.requestMeanMs, env.statistic.requestMaxMs);
 
-    if (http_parser_parse_url(url, strlen(url), 0, &parser)) {
-        return 1;
-    }
-
-    if (parser.field_set & 1 << UF_HOST) {
-        strncpy(env->host, url + parser.field_data[UF_HOST].off, parser.field_data[UF_HOST].len);
-    } else {
-        return 1;
-    }
-
-    if (parser.field_set & 1 << UF_PATH) {
-        strncpy(env->path, url + parser.field_data[UF_PATH].off, parser.field_data[UF_PATH].len);
-    } else {
-        strcpy(env->path, "/");
-    }
-
-    if (parser.field_set & 1 << UF_QUERY) {
-        strncpy(env->query, url + parser.field_data[UF_QUERY].off, parser.field_data[UF_QUERY].len);
-    }
-
-    env->port = parser.port;
-    if (env->port == 0) {
-        env->port = 80;
-    }
-    return 0;
+    printf("the slowest connect one: connect=%d, process=%d, request=%d\n", env.maxConnect.connectMs, env.maxConnect.processMs, env.maxConnect.requestMs);
+    printf("the slowest process one: connect=%d, process=%d, request=%d\n", env.maxProcess.connectMs, env.maxProcess.processMs, env.maxProcess.requestMs);
+    printf("the slowest request one: connect=%d, process=%d, request=%d\n", env.maxRequest.connectMs, env.maxRequest.processMs, env.maxRequest.requestMs);
 }
 
-static int parse_option(env_t* env, int argc, char* argv[])
+static void on_time_interval(event_timer_t* timer0, void* userdata)
 {
-    int ch;
-    while ((ch = getopt(argc, argv, "c:n:t:p:")) != -1) {
-        switch (ch) {
-        case 'c':
-            env->concurrency = strtoul(optarg, NULL, 10);
-            break;
-        case 'n':
-            env->totalRequestNum = strtoul(optarg, NULL, 10);
-            break;
-        case 'p':
-            env->processCount = strtoul(optarg, NULL, 10);
-            break;
-        case 't':
-            env->durationSeconds = strtoul(optarg, NULL, 10);
-            break;
-        default:
-            break;
+    // 增量产生压力
+    int incrementCount = 0;
+    for (int i = 0; i < env.concurrency; ++i) {
+        if (clientArr[i] == NULL) {
+            if (incrementCount < env.incrementNum) {
+                client_t* client = client_create(&env);
+                if (client) {
+                    ++incrementCount;
+                    clientArr[i] = client;
+                }
+            }
+        } else {
+            if (env.pendingRequestNum + env.finishRequestNum < env.totalRequestNum) {
+                client_update(clientArr[i]);
+            }
+            if (env.finishRequestNum >= env.totalRequestNum) {
+                stop = 1;
+            }
         }
     }
 
-    if (optind == 0) {
-        perror("bad url value\n");
-        return 1;
+    if (stop) {
+        event_release_timer(timer);
+        timer = NULL;
+        dump_statistic();
     }
-
-    char* url = argv[optind];
-    if (parse_url(env, url) != 0) {
-        printf("parse url fail:%s\n", url);
-        return 1;
-    }
-
-    if (env->concurrency == 0) {
-        perror("bad concurrency value\n");
-        return 1;
-    }
-    if (env->durationSeconds == 0 && env->totalRequestNum == 0) {
-        perror("bad durationSeconds or totalRequestNum value\n");
-        return 1;
-    }
-    return 0;
-}
-
-static void on_time_interval(event_timer_t* timer, void* userdata)
-{
-    printf("on time interval..\n");
 }
 
 int main(int argc, char* argv[])
 {
-    struct env_t env;
     memset(&env, 0, sizeof(struct env_t));
 
     // -c currency
     // -n total request num
     // -t duration seconds
     // -p process
-    if (parse_option(&env, argc, argv) != 0) {
+    if (env_parse_option(&env, argc, argv) != 0) {
         return 1;
     }
 
+    printf("concurrency=%u, thinkInterval=%u, incrementNum=%u, totalRequestNum=%u\n", env.concurrency, env.thinkInterval, env.incrementNum, env.totalRequestNum);
+
     event_create();
 
-    event_timer_t* timer = event_set_interval(on_time_interval, NULL, 1000);
-
-    client_t** clientArr = malloc(env.concurrency* sizeof(client_t*));
+    clientArr = malloc(env.concurrency* sizeof(client_t*));
     for (int i = 0; i < env.concurrency; ++i) {
-        client_t* client = client_create(&env);
-        clientArr[i] = client;
+        clientArr[i] = NULL;
     }
+
+    timer = event_set_interval(on_time_interval, NULL, env.thinkInterval);
 
     int err = 0;
     do {
         err = event_poll_once();
-    } while (!err);
+    } while (!err && stop == 0);
 
+    int existClients = 0;
     for (int i = 0; i < env.concurrency; ++i) {
         if (clientArr[i]) {
+            ++existClients;
             client_destroy(clientArr[i]);
         }
     }
     free(clientArr);
-    event_release_timer(timer);
+    if (timer) {
+        event_release_timer(timer);
+    }
+
+    printf("pendingRequestNum=%u, finishRequestNum=%u, existClients=%d\n", env.pendingRequestNum, env.finishRequestNum, existClients);
 
     event_destroy();
 

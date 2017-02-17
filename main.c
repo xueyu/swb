@@ -59,10 +59,6 @@ int main(int argc, char* argv[])
 {
     memset(&env, 0, sizeof(struct env_t));
 
-    // -c currency
-    // -n total request num
-    // -t duration seconds
-    // -p process
     if (env_parse_option(&env, argc, argv) != 0) {
         return 1;
     }
